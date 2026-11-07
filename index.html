@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>진코치 프로그레서</title>
+<style>
+  :root{
+    --bg:#14161a; --card:#1d2026; --line:#2b2f37; --text:#eceef2; --sub:#9aa1ad;
+    --accent:#ff7a2f; --good:#35c27a; --warn:#f2b84b; --bad:#ef5b5b;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
+  body{padding:max(16px,env(safe-area-inset-top)) 16px 40px;max-width:720px;margin:0 auto}
+  h1{font-size:20px;margin:4px 0 14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  h2{font-size:14px;color:var(--sub);margin:0 0 10px;font-weight:600}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  button,select,input{font:inherit;color:inherit}
+  button{background:#2a2e36;border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer}
+  button:hover{background:#333844}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#1a1005;font-weight:700}
+  button.danger{background:transparent;color:var(--bad);border-color:#4a2a2a}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  select,input[type=number]{background:#14161a;border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row > *{flex:1 1 auto}
+  .status{font-size:13px;color:var(--sub);display:flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--good)} .dot.sim{background:var(--warn)}
+  .big{font-size:64px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;text-align:center;margin:6px 0 2px}
+  .big small{font-size:20px;color:var(--sub);font-weight:600;margin-left:6px}
+  .rel{text-align:center;color:var(--sub);font-size:13px;min-height:18px}
+  canvas{width:100%;height:200px;display:block;background:#101216;border-radius:10px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+  .stat{background:#14161a;border-radius:10px;padding:8px;text-align:center}
+  .stat b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;color:var(--sub)}
+  .phase{text-align:center;font-size:22px;font-weight:800;padding:12px;border-radius:10px;margin-bottom:10px;background:#14161a}
+  .phase.hang{background:#17352a;color:var(--good)} .phase.rest{background:#2b2a14;color:var(--warn)}
+  .phase.ready{background:#3a2412;color:var(--accent)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  label{font-size:12px;color:var(--sub);display:block;margin-bottom:4px}
+  .hist-item{border-top:1px solid var(--line);padding:10px 0;display:flex;justify-content:space-between;gap:10px;font-size:14px}
+  .hist-item:first-child{border-top:0}
+  .hist-item .meta{color:var(--sub);font-size:12px}
+  .hist-item .val{text-align:right;font-variant-numeric:tabular-nums}
+  .empty{color:var(--sub);font-size:14px;text-align:center;padding:12px}
+  .note{font-size:12px;color:var(--sub);line-height:1.5}
+  .reps{font-size:12px;color:var(--sub);margin-top:6px;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<h1>
+  <span>🧗 진코치 프로그레서</span>
+  <span class="status"><span id="dot" class="dot"></span><span id="statusText">연결 안 됨</span></span>
+</h1>
+
+<!-- 연결 -->
+<div class="card">
+  <div class="row">
+    <button id="btnConnect" class="primary">Progressor 연결</button>
+    <button id="btnSim">시뮬레이션 모드</button>
+    <button id="btnTare" disabled>영점 맞추기</button>
+  </div>
+  <p id="supportNote" class="note" style="margin:10px 0 0"></p>
+</div>
+
+<!-- 실시간 -->
+<div class="card">
+  <div id="phase" class="phase" hidden></div>
+  <div class="big"><span id="live">0.0</span><small>kg</small></div>
+  <div id="rel" class="rel"></div>
+  <canvas id="chart"></canvas>
+  <div class="stats">
+    <div class="stat"><b id="stPeak">0.0</b><span>최대 (kg)</span></div>
+    <div class="stat"><b id="stAvg">0.0</b><span>평균 (kg)</span></div>
+    <div class="stat"><b id="stTime">0.0</b><span>시간 (초)</span></div>
+    <div class="stat"><b id="stRep">-</b><span>반복</span></div>
+  </div>
+  <div id="repList" class="reps"></div>
+</div>
+
+<!-- 측정 설정 -->
+<div class="card">
+  <h2>측정 설정</h2>
+  <div class="grid2" style="margin-bottom:8px">
+    <div>
+      <label for="mode">측정 방식</label>
+      <select id="mode">
+        <option value="free">자유 측정</option>
+        <option value="max">최대 근력 테스트 (7초)</option>
+        <option value="repeater">리피터 (7초 매달리기 / 3초 휴식 × 6)</option>
+      </select>
+    </div>
+    <div>
+      <label for="hand">사용한 손</label>
+      <select id="hand">
+        <option>양손</option><option>왼손</option><option>오른손</option>
+      </select>
+    </div>
+  </div>
+  <div class="grid2" style="margin-bottom:10px">
+    <div>
+      <label for="bw">체중 (kg, 선택)</label>
+      <input id="bw" type="number" min="0" max="200" step="0.1" inputmode="decimal" placeholder="예: 65">
+    </div>
+    <div>
+      <label for="edge">홀드 크기 (mm, 선택)</label>
+      <input id="edge" type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="예: 20">
+    </div>
+  </div>
+  <div class="row">
+    <button id="btnStart" class="primary" disabled>측정 시작</button>
+    <button id="btnStop" disabled>중지</button>
+  </div>
+  <p class="note" style="margin:10px 0 0">
+    최대 근력 테스트와 리피터는 3초 카운트다운 후 시작됩니다. 시작 전에 Progressor가 늘어지지 않은 상태에서 영점을 맞춰 주세요.
+  </p>
+  <div id="simBox" hidden style="margin-top:10px">
+    <button id="btnPull" style="width:100%;padding:16px">👆 누르고 있으면 당기는 힘 (시뮬레이션)</button>
+  </div>
+</div>
+
+<!-- 기록 -->
+<div class="card">
+  <h2>기록</h2>
+  <canvas id="trend" style="height:120px;margin-bottom:8px" hidden></canvas>
+  <div id="history"></div>
+  <div class="row" style="margin-top:10px">
+    <button id="btnCsv">CSV 내보내기</button>
+    <button id="btnClear" class="danger">기록 모두 삭제</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- Tindeq Progressor BLE 규격 ---------- */
+const SERVICE_UUID = "7e4e1701-1ea6-40c9-9dcc-13d34ffead57";
+const DATA_UUID    = "7e4e1702-1ea6-40c9-9dcc-13d34ffead57"; // notify
+const CTRL_UUID    = "7e4e1703-1ea6-40c9-9dcc-13d34ffead57"; // write
+const CMD_TARE = 0x64, CMD_START = 0x65, CMD_STOP = 0x66;
+const RES_WEIGHT = 0x01;
+
+/* ---------- 상태 ---------- */
+const $ = id => document.getElementById(id);
+const state = {
+  source: null,          // 'ble' | 'sim' | null
+  device: null, ctrl: null,
+  t0: null,              // 첫 샘플 시각 기준(초)
+  buf: [],               // 최근 샘플 {t, f}
+  session: null,         // 진행 중인 측정
+  simTimer: null, simForce: 0, simPull: false,
+};
+const WINDOW_SEC = 10;
+const HISTORY_KEY = "jincoach.history.v1";
+const SETTINGS_KEY = "jincoach.settings.v1";
+
+/* ---------- 유틸 ---------- */
+const fmt = (v, d = 1) => (Number.isFinite(v) ? v : 0).toFixed(d);
+const safe = (fn) => { try { return fn(); } catch (e) { return null; } };
+function setStatus(text, cls) {
+  $("statusText").textContent = text;
+  $("dot").className = "dot" + (cls ? " " + cls : "");
+}
+function beep(freq = 880, ms = 120) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    beep.ctx = beep.ctx || new AC();
+    const o = beep.ctx.createOscillator(), g = beep.ctx.createGain();
+    o.frequency.value = freq; g.gain.value = 0.08;
+    o.connect(g); g.connect(beep.ctx.destination);
+    o.start(); o.stop(beep.ctx.currentTime + ms / 1000);
+  } catch (e) {}
+}
+function bodyWeight() { const v = parseFloat($("bw").value); return v > 0 ? v : null; }
+
+/* ---------- 샘플 처리 ---------- */
+function onSample(kg, tSec) {
+  if (state.t0 === null) state.t0 = tSec;
+  const t = tSec - state.t0;
+  state.buf.push({ t, f: kg });
+  const cut = t - WINDOW_SEC - 1;
+  while (state.buf.length && state.buf[0].t < cut) state.buf.shift();
+
+  $("live").textContent = fmt(kg);
+  const bw = bodyWeight();
+  $("rel").textContent = bw ? `체중 대비 ${fmt(kg / bw * 100, 0)}%` : "";
+
+  const s = state.session;
+  if (s && s.recording) {
+    s.samples.push({ t, f: kg });
+    s.cur.push({ t, f: kg });
+    updateStats();
+  }
+}
+
+/* ---------- BLE ---------- */
+function handleNotify(ev) {
+  const dv = ev.target.value;
+  if (dv.byteLength < 2 || dv.getUint8(0) !== RES_WEIGHT) return;
+  for (let i = 2; i + 8 <= dv.byteLength; i += 8) {
+    const kg = dv.getFloat32(i, true);
+    const us = dv.getUint32(i + 4, true);
+    onSample(kg, us / 1e6);
+  }
+}
+
+async function connectBle() {
+  if (!navigator.bluetooth) {
+    alert("이 브라우저는 Web Bluetooth를 지원하지 않습니다.\n안드로이드 또는 PC의 크롬/엣지에서 열어 주세요.");
+    return;
+  }
+  stopSource();
+  try {
+    setStatus("기기 검색 중…", "");
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: "Progressor" }],
+      optionalServices: [SERVICE_UUID],
+    });
+    device.addEventListener("gattserverdisconnected", () => {
+      if (state.source === "ble") { stopSource(); setStatus("연결 끊김", ""); }
+    });
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SERVICE_UUID);
+    const data = await svc.getCharacteristic(DATA_UUID);
+    const ctrl = await svc.getCharacteristic(CTRL_UUID);
+    await data.startNotifications();
+    data.addEventListener("characteristicvaluechanged", handleNotify);
+    state.device = device; state.ctrl = ctrl; state.source = "ble"; state.t0 = null;
+    await ctrl.writeValue(new Uint8Array([CMD_START]));
+    setStatus(`연결됨 · ${device.name || "Progressor"}`, "on");
+    refreshButtons();
+  } catch (e) {
+    console.error(e);
+    stopSource();
+    setStatus("연결 실패", "");
+    if (e && e.name !== "NotFoundError") alert("연결에 실패했습니다: " + (e.message || e));
+  }
+}
+
+function startSim() {
+  stopSource();
+  state.source = "sim"; state.t0 = null; state.simForce = 0;
+  const t00 = performance.now();
+  state.simTimer = setInterval(() => {
+    const target = state.simPull ? 38 : 0;
+    state.simForce += (target - state.simForce) * 0.12;
+    const noise = (Math.random() - 0.5) * (state.simPull ? 1.2 : 0.1);
+    onSample(Math.max(0, state.simForce + noise), (performance.now() - t00) / 1000);
+  }, 1000 / 80);
+  setStatus("시뮬레이션 모드", "sim");
+  $("simBox").hidden = false;
+  refreshButtons();
+}
+
+function stopSource() {
+  if (state.session) finishSession(true);
+  if (state.simTimer) clearInterval(state.simTimer);
+  state.simTimer = null;
+  if (state.source === "ble" && state.ctrl) {
+    safe(() => state.ctrl.writeValue(new Uint8Array([CMD_STOP])).catch(() => {}));
+    safe(() => state.device.gatt.disconnect());
+  }
+  state.source = null; state.device = null; state.ctrl = null;
+  state.buf = []; state.t0 = null;
+  $("simBox").hidden = true;
+  $("live").textContent = "0.0"; $("rel").textContent = "";
+  setStatus("연결 안 됨", "");
+  refreshButtons();
+}
+
+async function tare() {
+  if (state.source === "ble" && state.ctrl) {
+    try { await state.ctrl.writeValue(new Uint8Array([CMD_TARE])); } catch (e) { console.error(e); }
+  } else if (state.source === "sim") {
+    state.simForce = 0;
+  }
+}
+
+/* ---------- 측정 세션 ---------- */
+const REPEATER = { reps: 6, hang: 7, rest: 3 };
+const COUNTDOWN = 3;
+
+function startSession() {
+  if (!state.source || state.session) return;
+  const mode = $("mode").value;
+  const s = {
+    mode, hand: $("hand").value, samples: [], cur: [], reps: [],
+    startedAt: Date.now(), recording: false, timer: null, repIdx: 0,
+  };
+  state.session = s;
+  $("repList").textContent = "";
+  $("stPeak").textContent = "0.0"; $("stAvg").textContent = "0.0";
+  $("stTime").textContent = "0.0"; $("stRep").textContent = "-";
+  refreshButtons();
+
+  if (mode === "free") {
+    s.recording = true; s.recStart = performance.now();
+    setPhase("hang", "측정 중");
+    return;
+  }
+  runPhases(s, buildPlan(mode));
+}
+
+function buildPlan(mode) {
+  const plan = [{ type: "ready", sec: COUNTDOWN, label: "준비" }];
+  if (mode === "max") {
+    plan.push({ type: "hang", sec: 7, label: "최대로 당기세요!", rep: 1 });
+  } else {
+    for (let i = 1; i <= REPEATER.reps; i++) {
+      plan.push({ type: "hang", sec: REPEATER.hang, label: `매달리기 ${i}/${REPEATER.reps}`, rep: i });
+      if (i < REPEATER.reps) plan.push({ type: "rest", sec: REPEATER.rest, label: "휴식" });
+    }
+  }
+  return plan;
+}
+
+function runPhases(s, plan) {
+  let idx = 0, phaseEnd = 0;
+  const enter = () => {
+    const p = plan[idx];
+    phaseEnd = performance.now() + p.sec * 1000;
+    s.recording = p.type === "hang";
+    s.phase = p;
+    if (p.type === "hang") { s.cur = []; s.recStart = performance.now(); s.repIdx = p.rep; beep(1100, 250); }
+    else if (p.type === "rest") beep(660, 200);
+    setPhase(p.type, p.label);
+  };
+  const leave = () => {
+    const p = plan[idx];
+    if (p.type === "hang" && s.cur.length) {
+      s.reps.push(summarize(s.cur));
+      renderReps(s);
+    }
+  };
+  enter();
+  s.timer = setInterval(() => {
+    if (state.session !== s) return clearInterval(s.timer);
+    const remain = (phaseEnd - performance.now()) / 1000;
+    const p = plan[idx];
+    $("phase").textContent = `${p.label} · ${Math.max(0, Math.ceil(remain))}`;
+    if (p.type === "ready" && remain > 0 && remain < 3 && Math.abs(remain - Math.round(remain)) < 0.05) beep(660, 80);
+    if (remain <= 0) {
+      leave();
+      idx++;
+      if (idx >= plan.length) { clearInterval(s.timer); finishSession(false); return; }
+      enter();
+    }
+  }, 100);
+}
+
+function setPhase(type, text) {
+  const el = $("phase");
+  el.hidden = false; el.className = "phase " + type; el.textContent = text;
+}
+
+function summarize(samples) {
+  if (!samples.length) return { peak: 0, avg: 0, dur: 0 };
+  let peak = 0, sum = 0;
+  for (const x of samples) { if (x.f > peak) peak = x.f; sum += x.f; }
+  return { peak, avg: sum / samples.length, dur: samples[samples.length - 1].t - samples[0].t };
+}
+
+function updateStats() {
+  const s = state.session; if (!s) return;
+  const src = s.mode === "free" ? s.samples : s.cur;
+  const sm = summarize(src);
+  $("stPeak").textContent = fmt(sm.peak);
+  $("stAvg").textContent = fmt(sm.avg);
+  $("stTime").textContent = fmt(sm.dur);
+  $("stRep").textContent = s.mode === "repeater" ? `${s.repIdx}/${REPEATER.reps}` : "-";
+}
+
+function renderReps(s) {
+  if (s.mode !== "repeater") return;
+  $("repList").textContent = "회차별 최대: " + s.reps.map((r, i) => `${i + 1}회 ${fmt(r.peak)}kg`).join(" · ");
+}
+
+function finishSession(aborted) {
+  const s = state.session; if (!s) return;
+  clearInterval(s.timer);
+  state.session = null;
+  s.recording = false;
+  $("phase").hidden = true;
+  refreshButtons();
+
+  if (s.mode === "free") s.reps = s.samples.length ? [summarize(s.samples)] : [];
+  if (aborted && s.mode !== "free") {
+    // 중도 중지: 진행 중이던 회차는 버리고 완료한 회차만 남김
+  }
+  if (!s.reps.length || s.reps.every(r => r.peak < 1)) return; // 의미 있는 데이터 없음
+
+  const peak = Math.max(...s.reps.map(r => r.peak));
+  const avg = s.reps.reduce((a, r) => a + r.avg, 0) / s.reps.length;
+  const dur = s.reps.reduce((a, r) => a + r.dur, 0);
+  const entry = {
+    id: s.startedAt, ts: s.startedAt, mode: s.mode, hand: s.hand,
+    peak, avg, dur, reps: s.reps.map(r => +r.peak.toFixed(2)),
+    bw: bodyWeight(), edge: parseFloat($("edge").value) || null,
+    partial: (aborted && s.mode !== "free") || undefined,
+  };
+  const list = loadHistory(); list.unshift(entry); saveHistory(list);
+  renderHistory();
+}
+
+/* ---------- 기록 저장 ---------- */
+function loadHistory() { return safe(() => JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]")) || []; }
+function saveHistory(list) { safe(() => localStorage.setItem(HISTORY_KEY, JSON.stringify(list))); }
+const MODE_NAME = { free: "자유 측정", max: "최대 근력", repeater: "리피터" };
+
+function renderHistory() {
+  const list = loadHistory();
+  const box = $("history");
+  box.textContent = "";
+  if (!list.length) {
+    const d = document.createElement("div");
+    d.className = "empty"; d.textContent = "아직 기록이 없어요. 첫 측정을 시작해 보세요.";
+    box.appendChild(d);
+  }
+  for (const h of list.slice(0, 30)) {
+    const row = document.createElement("div"); row.className = "hist-item";
+    const left = document.createElement("div");
+    const t = document.createElement("div");
+    t.textContent = `${MODE_NAME[h.mode] || h.mode} · ${h.hand}${h.partial ? " (중단)" : ""}`;
+    const m = document.createElement("div"); m.className = "meta";
+    const d = new Date(h.ts);
+    let meta = d.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    if (h.edge) meta += ` · ${h.edge}mm`;
+    if (h.mode === "repeater") meta += ` · ${h.reps.length}회`;
+    m.textContent = meta;
+    left.append(t, m);
+    const right = document.createElement("div"); right.className = "val";
+    const pv = document.createElement("div");
+    pv.textContent = `${fmt(h.peak)} kg`;
+    const sub = document.createElement("div"); sub.className = "meta";
+    sub.textContent = `평균 ${fmt(h.avg)}kg` + (h.bw ? ` · 체중의 ${fmt(h.peak / h.bw * 100, 0)}%` : "");
+    right.append(pv, sub);
+    row.append(left, right);
+    box.appendChild(row);
+  }
+  drawTrend(list);
+}
+
+function drawTrend(list) {
+  const cv = $("trend");
+  const pts = list.filter(h => h.mode !== "repeater").slice(0, 20).reverse();
+  cv.hidden = pts.length < 2;
+  if (cv.hidden) return;
+  const { ctx, w, h } = prepCanvas(cv);
+  ctx.clearRect(0, 0, w, h);
+  const vals = pts.map(p => p.peak);
+  const max = Math.max(...vals) * 1.1, min = Math.min(...vals) * 0.9;
+  ctx.strokeStyle = "#ff7a2f"; ctx.lineWidth = 2; ctx.beginPath();
+  vals.forEach((v, i) => {
+    const x = 12 + (w - 24) * i / (vals.length - 1);
+    const y = h - 14 - (h - 28) * (v - min) / ((max - min) || 1);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  ctx.fillStyle = "#9aa1ad"; ctx.font = "11px sans-serif";
+  ctx.fillText("최대 근력 추이 (kg)", 8, 12);
+  ctx.fillText(fmt(vals[vals.length - 1]) + "kg", w - 52, 12);
+}
+
+function exportCsv() {
+  const list = loadHistory();
+  if (!list.length) return alert("내보낼 기록이 없습니다.");
+  const head = ["일시", "방식", "손", "최대(kg)", "평균(kg)", "시간(초)", "체중(kg)", "홀드(mm)", "회차별 최대(kg)"];
+  const rows = list.map(h => [
+    new Date(h.ts).toLocaleString("ko-KR"), MODE_NAME[h.mode] || h.mode, h.hand,
+    fmt(h.peak, 2), fmt(h.avg, 2), fmt(h.dur, 1), h.bw ?? "", h.edge ?? "", (h.reps || []).join("/"),
+  ]);
+  const csv = "﻿" + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  a.download = "jincoach-progressor.csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ---------- 차트 ---------- */
+function prepCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+
+function drawChart() {
+  const { ctx, w, h } = prepCanvas($("chart"));
+  ctx.clearRect(0, 0, w, h);
+  const buf = state.buf;
+  const tNow = buf.length ? buf[buf.length - 1].t : 0;
+  const tMin = tNow - WINDOW_SEC;
+  let yMax = 20;
+  for (const p of buf) if (p.f > yMax) yMax = p.f;
+  yMax = Math.ceil(yMax / 10) * 10;
+
+  ctx.strokeStyle = "#23272f"; ctx.fillStyle = "#6b727e"; ctx.font = "11px sans-serif"; ctx.lineWidth = 1;
+  const step = yMax > 60 ? 20 : 10;
+  for (let v = 0; v <= yMax; v += step) {
+    const y = h - 16 - (h - 24) * v / yMax;
+    ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.fillText(v, 4, y + 4);
+  }
+  if (buf.length < 2) return;
+  ctx.strokeStyle = "#ff7a2f"; ctx.lineWidth = 2; ctx.beginPath();
+  let first = true;
+  for (const p of buf) {
+    if (p.t < tMin) continue;
+    const x = 30 + (w - 34) * (p.t - tMin) / WINDOW_SEC;
+    const y = h - 16 - (h - 24) * Math.max(0, p.f) / yMax;
+    first ? (ctx.moveTo(x, y), first = false) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = "#6b727e"; ctx.fillText("최근 10초", w - 62, h - 3);
+}
+(function loop() { drawChart(); requestAnimationFrame(loop); })();
+
+/* ---------- UI ---------- */
+function refreshButtons() {
+  const on = !!state.source, running = !!state.session;
+  $("btnTare").disabled = !on || running;
+  $("btnStart").disabled = !on || running;
+  $("btnStop").disabled = !running;
+  $("mode").disabled = running;
+  $("btnConnect").textContent = state.source === "ble" ? "연결 해제" : "Progressor 연결";
+}
+
+$("btnConnect").onclick = () => state.source === "ble" ? stopSource() : connectBle();
+$("btnSim").onclick = () => state.source === "sim" ? stopSource() : startSim();
+$("btnTare").onclick = tare;
+$("btnStart").onclick = startSession;
+$("btnStop").onclick = () => finishSession(true);
+$("btnCsv").onclick = exportCsv;
+$("btnClear").onclick = () => {
+  if (confirm("모든 기록을 삭제할까요? 되돌릴 수 없습니다.")) { saveHistory([]); renderHistory(); }
+};
+const pull = $("btnPull");
+const setPull = v => () => { state.simPull = v; };
+pull.addEventListener("pointerdown", setPull(true));
+["pointerup", "pointerleave", "pointercancel"].forEach(e => pull.addEventListener(e, setPull(false)));
+
+// 설정 기억
+for (const id of ["hand", "bw", "edge", "mode"]) {
+  const saved = safe(() => (JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"))[id]);
+  if (saved != null) $(id).value = saved;
+  $(id).addEventListener("change", () => {
+    const cur = safe(() => JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")) || {};
+    cur[id] = $(id).value;
+    safe(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(cur)));
+  });
+}
+
+if (!navigator.bluetooth) {
+  $("supportNote").textContent =
+    "이 브라우저는 Web Bluetooth를 지원하지 않아 실제 기기 연결은 어렵습니다. 안드로이드/PC의 크롬·엣지를 쓰거나 시뮬레이션 모드로 체험해 보세요. (iOS 사파리는 미지원)";
+} else {
+  $("supportNote").textContent = "Progressor 전원을 켠 뒤 '연결'을 누르고 목록에서 기기를 선택하세요.";
+}
+renderHistory();
+refreshButtons();
+</script>
+</body>
+</html>
